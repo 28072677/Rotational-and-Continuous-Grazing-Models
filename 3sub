@@ -1,0 +1,131 @@
+%  Dynamic Intrinsic Growth Rate 
+%  N = 3 subpastures
+
+% Parameters 
+A = 100;                % total area (ha)
+K_tot = 3000000;        % total carrying capacity (kg)
+C = 400;                % cattle number
+a = 1e-4;               % grazing efficiency
+thr_frac = 0.2;         % threshold fraction to move cattle
+Tmax = 365;             % simulation days
+dt = 0.05;              % time step (day)
+
+% Dynamic Growth Rate Parameters 
+r_max = 0.04;           % maximum intrinsic growth rate (1/day)
+alpha = 0.02;           % recovery rate of r (1/day)
+beta  = 5e-12;          % baseline grazing-induced reduction
+N = 3;
+
+
+%  Dynamic r simulation
+[t, G, r, cur, avg_dyn] = simulate(N, r_max, alpha, beta, true, ...
+    K_tot, A, C, a, thr_frac, Tmax, dt);
+
+fprintf('N = %d: avg biomass (dynamic r) = %.2f kg/ha\n', N, avg_dyn);
+
+K_i = K_tot / N;
+A_i = A / N;
+colours = lines(N);
+
+% Plot biomass and r(t) 
+figure('Name','N = 3: Biomass and Growth Rate','Position',[100 100 1100 800]);
+
+% Biomass 
+subplot(2,1,1); hold on;
+h = gobjects(N,1);
+for i = 1:N
+    h(i) = plot(t, G(:,i)/A_i, 'Color', colours(i,:), 'LineWidth', 1.8);
+end
+hK = yline(K_i/A_i, 'k--', 'LineWidth', 1.2);           
+hT = yline(thr_frac*K_i/A_i, 'k:', 'LineWidth', 1.2);   
+
+xlabel('Time (days)');
+ylabel('Biomass (kg/ha)');
+title(sprintf('Biomass per subpasture (N = %d)', N));
+
+legend([h; hK; hT], ...
+       [arrayfun(@(i) sprintf('Subpasture %d',i), 1:N, 'Uni', false), ...
+        {'Carrying capacity','Threshold'}], ...
+       'Location','best');
+grid on; xlim([0 Tmax]);
+
+% r(t)
+subplot(2,1,2); hold on;
+hr = gobjects(N,1);
+for i = 1:N
+    hr(i) = plot(t, r(:,i), 'Color', colours(i,:), 'LineWidth', 1.8);
+end
+hRmax = yline(r_max, 'k--', 'LineWidth', 1.2);          
+
+xlabel('Time (days)');
+ylabel('r(t)  (1/day)');
+title(sprintf('Intrinsic growth rate r(t) per subpasture (N = %d)', N));
+
+legend([hr; hRmax], ...
+       [arrayfun(@(i) sprintf('Subpasture %d',i), 1:N, 'Uni', false), ...
+        {'r_{max}'}], ...
+       'Location','best');
+grid on; xlim([0 Tmax]); ylim([0 r_max*1.1]);
+
+
+% Comparing constant verses dynamic r 
+fprintf(' CONSTANT vs DYNAMIC r\n');
+
+[~,~,~,~,avg_const] = simulate(N, r_max, alpha, beta, false, ...
+    K_tot, A, C, a, thr_frac, Tmax, dt);
+
+fprintf('Constant r : %.2f kg/ha\n', avg_const);
+fprintf('Dynamic  r : %.2f kg/ha\n', avg_dyn);
+
+figure('Name','Constant vs dynamic r (N = 3)');
+bar([1 2], [avg_const, avg_dyn], 0.5);
+set(gca, 'XTick', [1 2], 'XTickLabel', {'Constant r','Dynamic r(t)'});
+ylabel('Average biomass (kg/ha)');
+title(sprintf('Constant vs dynamic growth rate (N = %d)', N));
+grid on;
+
+
+%  Local simulation function
+function [t_h, G_h, r_h, cur_h, avg_ha] = simulate(...
+    N, r_max, alpha, beta, use_dynamic_r, ...
+    K_tot, A, C, a, thr_frac, Tmax, dt)
+
+    K_i = K_tot / N;
+    G = K_i * ones(1, N);
+    r = r_max * ones(1, N);
+    t = 0; current = 1;
+    
+    nsteps = ceil(Tmax/dt);
+    t_h   = zeros(nsteps,1);
+    G_h   = zeros(nsteps, N);
+    r_h   = zeros(nsteps, N);
+    cur_h = zeros(nsteps, 1);
+    idx   = 1;
+    
+    while t < Tmax
+        I = zeros(1,N); I(current) = 1;
+        for i = 1:N
+            dG = r(i)*G(i)*(1 - G(i)/K_i) - I(i)*G(i)*C*a;
+            if use_dynamic_r
+                dr = alpha*(r_max - r(i)) - beta*I(i)*G(i)*C;
+                r(i) = max(0, r(i) + dr*dt);
+            end
+            G(i) = max(0, G(i) + dG*dt);
+        end
+        t = t + dt;
+        t_h(idx)   = t;
+        G_h(idx,:) = G;
+        r_h(idx,:) = r;
+        cur_h(idx) = current;
+        idx = idx + 1;
+        if G(current) < thr_frac*K_i
+            current = mod(current, N) + 1;
+        end
+    end
+    t_h   = t_h(1:idx-1);
+    G_h   = G_h(1:idx-1,:);
+    r_h   = r_h(1:idx-1,:);
+    cur_h = cur_h(1:idx-1);
+    avg_ha = mean(sum(G_h,2))/A;
+end
+
